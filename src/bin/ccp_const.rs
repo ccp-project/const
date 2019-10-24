@@ -87,5 +87,5 @@ fn main() {
     .map_err(|e| warn!(log, "bad argument"; "err" => ?e))
     .unwrap();
 
-    portus::start!(ipc.as_str(), Some(log), cfg).unwrap()
+    portus::start!(ipc.as_str(), Some(log), cfg, portus::ipc::Blocking, 1).unwrap()
 }

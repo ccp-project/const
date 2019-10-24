@@ -35,19 +35,21 @@ impl<I: Ipc> CongAlg<I> for CcpConstAlg {
             "constant",
             "
             (def (Report
+                (volatile acked 0)
                 (volatile rtt 0)
                 (volatile rin 0)
                 (volatile rout 0)
                 (volatile loss 0)
             ))
             (when true
+                (:= Report.acked (+ Report.acked Ack.packets_acked))
                 (:= Report.rtt Flow.rtt_sample_us)
                 (:= Report.rin Flow.rate_outgoing)
                 (:= Report.rout Flow.rate_incoming)
                 (:= Report.loss (+ Report.loss Ack.lost_pkts_sample))
                 (fallthrough)
             )
-            (when (> Micros Flow.rtt_sample_us)
+            (when (> Micros 1000000)
                 (report)
                 (:= Micros 0)
             )"
@@ -75,6 +77,9 @@ impl<I: Ipc> CongAlg<I> for CcpConstAlg {
 
 impl portus::Flow for CcpConstFlow {
     fn on_report(&mut self, _sock_id: u32, m: Report) {
+        let acked = m
+            .get_field("Report.acked", &self.sc)
+            .expect("expected acked in report") as u32;
         let rtt = m
             .get_field("Report.rtt", &self.sc)
             .expect("expected rtt in report") as u32;
@@ -90,6 +95,7 @@ impl portus::Flow for CcpConstFlow {
 
         self.logger.as_ref().map(|log| {
             debug!(log, "report";
+                "acked(pkts)" => acked,
                 "rtt(us)" => rtt,
                 "rin(Bps)" => rin,
                 "rout(Bps)" => rout,
