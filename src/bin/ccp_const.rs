@@ -87,5 +87,9 @@ fn main() {
     .map_err(|e| warn!(log, "bad argument"; "err" => ?e))
     .unwrap();
 
-    portus::start!(ipc.as_str(), Some(log), cfg, portus::ipc::Blocking, 1).unwrap()
+    match ipc.as_str() {
+        "unix" => portus::start!(ipc.as_str(), Some(log), cfg, portus::ipc::Blocking, 10).unwrap(),
+        "netlink" => portus::start!(ipc.as_str(), Some(log), cfg).unwrap(),
+        _ => unimplemented!()
+    }
 }
