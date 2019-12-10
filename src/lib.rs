@@ -38,11 +38,13 @@ impl<I: Ipc> CongAlg<I> for CcpConstAlg {
                 (volatile rtt 0)
                 (volatile rin 0)
                 (volatile rout 0)
+                (volatile loss 0)
             ))
             (when true
                 (:= Report.rtt Flow.rtt_sample_us)
                 (:= Report.rin Flow.rate_outgoing)
                 (:= Report.rout Flow.rate_incoming)
+                (:= Report.loss (+ Report.loss Ack.lost_pkts_sample))
                 (fallthrough)
             )
             (when (> Micros Flow.rtt_sample_us)
@@ -82,12 +84,16 @@ impl portus::Flow for CcpConstFlow {
         let rout = m
             .get_field("Report.rout", &self.sc)
             .expect("expected rout in report") as u32;
+        let loss = m
+            .get_field("Report.loss", &self.sc)
+            .expect("expected loss in report") as u32;
 
         self.logger.as_ref().map(|log| {
             debug!(log, "report";
                 "rtt(us)" => rtt,
                 "rin(Bps)" => rin,
                 "rout(Bps)" => rout,
+                "loss(pkts)" => loss,
             );
         });
     }
