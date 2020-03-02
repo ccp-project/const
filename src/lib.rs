@@ -4,10 +4,10 @@ extern crate slog;
 use portus::ipc::Ipc;
 use portus::lang::Scope;
 use portus::{CongAlg, Datapath, DatapathInfo, DatapathTrait, Report};
-use slog::debug;
+use slog::{debug, warn};
 use std::collections::HashMap;
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum Constant {
     Cwnd(u32),
     Rate { rate: u32, cwnd_cap: u32 },
@@ -17,13 +17,15 @@ pub struct CcpConstAlg {
     pub const_param: Constant,
 }
 
-pub struct CcpConstFlow {
+pub struct CcpConstFlow<T: Ipc> {
     logger: Option<slog::Logger>,
     sc: Scope,
+    control_channel : Datapath<T>,
+    const_param : Constant,
 }
 
 impl<I: Ipc> CongAlg<I> for CcpConstAlg {
-    type Flow = CcpConstFlow;
+    type Flow = CcpConstFlow<I>;
 
     fn name() -> &'static str {
         "constant"
@@ -57,7 +59,7 @@ impl<I: Ipc> CongAlg<I> for CcpConstAlg {
         h
     }
 
-    fn new_flow(&self, mut control: Datapath<I>, info: DatapathInfo) -> Self::Flow {
+    fn new_flow(&self, mut control: Datapath<I>, _info: DatapathInfo) -> Self::Flow {
         let params = match self.const_param {
             Constant::Cwnd(c) => vec![("Cwnd", c)],
             Constant::Rate {
@@ -69,11 +71,13 @@ impl<I: Ipc> CongAlg<I> for CcpConstAlg {
         CcpConstFlow {
             logger: self.logger.clone(),
             sc,
+            control_channel: control,
+            const_param: self.const_param,
         }
     }
 }
 
-impl portus::Flow for CcpConstFlow {
+impl<T: Ipc> portus::Flow for CcpConstFlow<T> {
     fn on_report(&mut self, _sock_id: u32, m: Report) {
         let rtt = m
             .get_field("Report.rtt", &self.sc)
@@ -96,5 +100,18 @@ impl portus::Flow for CcpConstFlow {
                 "loss(pkts)" => loss,
             );
         });
+
+        let update = match self.const_param {
+            Constant::Cwnd(c) => vec![("Cwnd", c)],
+            Constant::Rate {
+                rate: r,
+                cwnd_cap: c,
+            } => vec![("Cwnd", c), ("Rate", r)],
+        };
+        if let Err(e) = self.control_channel.update_field(&self.sc, &update) {
+            self.logger.as_ref().map(|log| {
+                warn!(log, "rate update error"; "err" => ?e,);
+            });
+        }
     }
 }
