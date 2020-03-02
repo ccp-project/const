@@ -4,6 +4,10 @@ version = "0.1.0"
 authors = ["<ccp@csail.mit.edu"]
 
 [dependencies]
-portus = "0.5.1"
+portus = { git = "https://github.com/ccp-project/portus", branch = "many_to_one" }
 clap = "2.29"
 slog = "2"
+
+[dependencies.nom]
+version = "4"
+features = ["verbose-errors"]
