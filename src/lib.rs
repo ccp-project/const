@@ -1,9 +1,11 @@
 extern crate portus;
+extern crate portus_export;
 extern crate slog;
+extern crate clap;
 
 use portus::ipc::Ipc;
 use portus::lang::Scope;
-use portus::{CongAlg, Datapath, DatapathInfo, DatapathTrait, Report};
+use portus::{CongAlg, CongAlgBuilder, Datapath, DatapathInfo, DatapathTrait, Report};
 use slog::{debug, warn};
 use std::collections::HashMap;
 
@@ -12,6 +14,8 @@ pub enum Constant {
     Cwnd(u32),
     Rate { rate: u32, cwnd_cap: u32 },
 }
+
+#[portus_export::register_ccp_alg]
 pub struct CcpConstAlg {
     pub logger: Option<slog::Logger>,
     pub const_param: Constant,
@@ -76,6 +80,77 @@ impl<I: Ipc> CongAlg<I> for CcpConstAlg {
         }
     }
 }
+
+use clap::Arg;
+const MBPS_TO_BPS: u32 = 1_000_000;
+const BITS_TO_BYTES: u32 = 8;
+const PKTS_TO_BYTES: u32 = 1500;
+impl<'a,'b> CongAlgBuilder<'a,'b> for CcpConstAlg {
+    fn args() -> clap::App<'a,'b> {
+        clap::App::new("CCP Constant Cwnd/Rate")
+            .version("0.2.0")
+            .author("<ccp@csail.mit.edu>")
+            .about("Congestion control algorithm which sets a constant rate or cwnd")
+            .arg(
+                Arg::with_name("cwnd")
+                    .long("cwnd")
+                    .takes_value(true)
+                    .help("Sets the congestion window, in packets."),
+            )
+            .arg(
+                Arg::with_name("rate")
+                    .long("rate")
+                    .takes_value(true)
+                    .help("Sets the rate to use, in Mbps, must also specify cwnd_cap"),
+            )
+            .arg(
+                Arg::with_name("cwnd_cap")
+                    .long("cwnd_cap")
+                    .takes_value(true)
+                    .help("The max cwnd, in packets, *only* when setting a rate"),
+            )
+            .group(
+                clap::ArgGroup::with_name("to_set")
+                    .args(&["cwnd", "rate"])
+                    .required(true),
+            )
+    }
+
+    fn with_arg_matches(args: &clap::ArgMatches, logger: Option<slog::Logger>) -> Result<Self, portus::Error> {
+        if !args.is_present("to_set") {
+            return Err(portus::Error(String::from("must supply either cwnd or rate")));
+        }
+
+        let const_param = if args.is_present("rate") {
+            let rate = u32::from_str_radix(args.value_of("rate").unwrap(), 10)
+                .map_err(|e| portus::Error(e.to_string()))?;
+            if !args.is_present("cwnd_cap") {
+                return Err(portus::Error(String::from("when using rate, must also specify cwnd_cap")));
+            }
+            let cwnd_cap = u32::from_str_radix(args.value_of("cwnd_cap").unwrap(), 10)
+                .map_err(|e| portus::Error(e.to_string()))?;
+
+            let rate = rate * MBPS_TO_BPS / BITS_TO_BYTES;
+            let cwnd_cap = cwnd_cap * PKTS_TO_BYTES;
+            Ok(Constant::Rate { rate, cwnd_cap })
+        } else if args.is_present("cwnd") {
+            let cwnd = u32::from_str_radix(args.value_of("cwnd").unwrap(), 10)
+                .map_err(|e| portus::Error(e.to_string()))?;
+            let cwnd = cwnd * PKTS_TO_BYTES;
+            Ok(Constant::Cwnd(cwnd))
+        } else {
+            Err(portus::Error(String::from("must supply either cwnd or rate")))
+        }?;
+
+        Ok(
+            Self {
+                logger: logger,
+                const_param,
+            }
+        )
+    }
+}
+
 
 impl<T: Ipc> portus::Flow for CcpConstFlow<T> {
     fn on_report(&mut self, _sock_id: u32, m: Report) {
